@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 type User = {
   id: string;
   user: string;
 };
 
-interface WSMessage extends User {
+export interface WSMessage extends User {
   message: string;
   status: string;
 }
@@ -15,6 +16,7 @@ type AppState = {
   hasUsername: boolean;
   open: boolean;
   username: string;
+  isTyping: boolean;
 };
 
 type Action = {
@@ -23,12 +25,13 @@ type Action = {
   setHasUsername: (hasUsername: boolean) => void;
   setOpen: (open: boolean) => void;
   setUsername: (username: string) => void;
+  setIsTyping: (boolean: boolean) => void;
   // updateLastName: (lastName: State['lastName']) => void
 };
 const initialState: AppState = {
   userID: {
     id: "",
-    user: "accel",
+    user: "",
     message: "",
     status: "",
   },
@@ -36,14 +39,24 @@ const initialState: AppState = {
   hasUsername: false,
   open: false,
   username: "",
+  isTyping: false,
 };
 
-export const useStore = create<AppState & Action>()((set) => ({
-  ...initialState,
-  setIsConnected: (bool) => set(() => ({ isConnected: bool })),
-  setUserID: (userID) => set(() => ({ userID: userID })),
-  setHasUsername: (hasUsername) => set(() => ({ hasUsername: hasUsername })),
-  setOpen: (open) => set(() => ({ open: open })),
-  setUsername: (username) =>
-    set((state) => ({ userID: { ...state.userID, user: username } })),
-}));
+export const useStore = create<AppState & Action>()(
+  persist(
+    (set) => ({
+      ...initialState,
+      setIsConnected: (bool) => set(() => ({ isConnected: bool })),
+      setUserID: (userID) => set(() => ({ userID: userID })),
+      setHasUsername: (hasUsername) =>
+        set(() => ({ hasUsername: hasUsername })),
+      setOpen: (open) => set(() => ({ open: open })),
+      setUsername: (username) => set(() => ({ username: username })),
+      setIsTyping: (typing) => set(() => ({ isTyping: typing })),
+    }),
+    {
+      name: "user-details", // name of item in the storage (must be unique)
+      partialize: (state) => ({ userID: state.userID }),
+    }
+  )
+);

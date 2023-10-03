@@ -1,55 +1,46 @@
 import Chat, {
   Bubble,
-  Button,
   Input,
   MessageProps,
   Modal,
   useMessages,
 } from "@chatui/core";
 import "@chatui/core/dist/index.css";
-import { useEffect, useReducer, useRef } from "react";
-import { genUniqueId } from "../lib/genUUID";
+import { useEffect, useRef } from "react";
+import { useShallow } from "zustand/shallow";
 import { websocket } from "../lib/socket";
-import { AppState, appReducer } from "../reducers/appReducer";
-import { useStore } from "../store/chat";
-
-type User = {
-  id: string;
-  user: string;
-};
-
-interface WSMessage extends User {
-  message: string;
-  status: string;
-}
-
-const initialState: AppState = {
-  userID: {
-    id: "",
-    user: "accel",
-    message: "",
-    status: "",
-  },
-  isConnected: false,
-  hasUsername: false,
-  open: false,
-  username: "",
-};
+import { WSMessage, useStore } from "../store/chat";
 
 const initialMessages = [
   {
     type: "text",
     content: { text: "Hello, try sending a message" },
     user: {
-      avatar: "//gw.alicdn.com/tfs/TB1DYHLwMHqK1RjSZFEXXcGMXXa-56-62.svg",
+      avatar: "http://gw.alicdn.com/tfs/TB1DYHLwMHqK1RjSZFEXXcGMXXa-56-62.svg",
     },
   },
 ];
 export default function ChatUI() {
   const { messages, appendMsg, setTyping } = useMessages(initialMessages);
-  const [state, dispatch] = useReducer(appReducer, initialState);
+  // const [state, dispatch] = useReducer(appReducer, initialState);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { setIsConnected, setHasUsername, setOpen, setUserID } = useStore();
+  const {
+    isTyping,
+    setIsTyping,
+    setIsConnected,
+    setHasUsername,
+    setUsername,
+    setOpen,
+    setUserID,
+  } = useStore();
+  const { open, isConnected, userID, username } = useStore(
+    useShallow((state) => ({
+      open: state.open,
+      isConnected: state.isConnected,
+      userID: state.userID,
+      username: state.username,
+    }))
+  );
   useEffect(() => {
     const connectWebSocket = () => {
       websocket.addEventListener("open", onConnect);
@@ -65,24 +56,27 @@ export default function ChatUI() {
 
     function addNewMsg(event: MessageEvent) {
       let data: WSMessage = JSON.parse(event.data);
-      console.debug(data, state.userID);
-      console.debug(data.id == state.userID.id);
-      if (state.userID.id !== data.id) {
+      if (userID.id !== data.id) {
+        console.debug(data, userID);
+        console.debug(data.id == userID.id);
         switch (data.status) {
           case "typing":
             setTyping(true);
+            // setIsTyping(true);
+            // console.log("is typing here");
             if (typingTimeoutRef.current) {
               clearTimeout(typingTimeoutRef.current);
             }
             typingTimeoutRef.current = setTimeout(() => {
               setTyping(false);
+              setIsTyping(false);
             }, 1000);
             break;
           case "setup":
-            dispatch({ type: "SET_USER_ID", userID: data });
-            setUserID(data);
+            setUserID({ ...data, user: userID.user, status: "" });
             console.log(data);
-            console.log(state.userID);
+            // console.log(state.userID);
+            console.log(userID);
             break;
           default:
             appendMsg({
@@ -98,14 +92,10 @@ export default function ChatUI() {
 
     function onConnect() {
       console.log("connected");
-      dispatch({ type: "SET_IS_CONNECTED", isConnected: true });
       setIsConnected(true);
-      // dispatch({ type: "SET_USER_ID", userID: state.userID });
-      // console.log(state);
     }
 
     function onDisconnect() {
-      dispatch({ type: "SET_IS_CONNECTED", isConnected: false });
       setIsConnected(false);
     }
 
@@ -115,20 +105,28 @@ export default function ChatUI() {
       websocket.removeEventListener("close", reConnect);
       websocket.removeEventListener("message", addNewMsg);
     };
-  }, [state, setTyping, appendMsg]);
+  }, [userID]);
 
   function handleOpen() {
-    dispatch({ type: "SET_OPEN", open: true });
     setOpen(true);
   }
 
   function handleClose() {
-    dispatch({ type: "SET_OPEN", open: false });
     setOpen(false);
   }
 
   function handleChange() {
-    websocket.send(JSON.stringify({ ...state.userID, status: "typing" }));
+    if (!isTyping) {
+      websocket.send(JSON.stringify({ ...userID, status: "typing" }));
+      setIsTyping(true);
+      if (typingTimeoutRef.current) {
+        clearInterval(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = setInterval(() => {
+        setTyping(false);
+        setIsTyping(false);
+      }, 1000);
+    }
   }
 
   function handleSend(type: string, val: string) {
@@ -137,10 +135,10 @@ export default function ChatUI() {
         type: "text",
         content: { text: val },
         position: "right",
-        user: { name: state.userID.user },
+        user: { name: userID.user },
       });
-      const data: WSMessage = { ...state.userID, status: "", message: val };
-      console.log(data, state.userID);
+      const data: WSMessage = { ...userID, status: "", message: val };
+      console.log(data, userID);
       websocket.send(JSON.stringify(data));
     }
   }
@@ -154,7 +152,7 @@ export default function ChatUI() {
 
     switch (type) {
       case "text":
-        return <Bubble content={content.text} title="idk" />;
+        return <Bubble content={content.text} title="content" />;
       case "image":
         return (
           <Bubble type="image">
@@ -188,9 +186,8 @@ export default function ChatUI() {
   return (
     <>
       <div>
-        <Button onClick={() => handleOpen()}>Open</Button>
         <Modal
-          active={state.open}
+          active={open}
           title="Set Username"
           showClose={false}
           onClose={handleClose}
@@ -200,11 +197,14 @@ export default function ChatUI() {
               color: "primary",
               inputMode: "text",
               onClick: () => {
-                dispatch({
-                  type: "SET_USER_ID",
-                  userID: { ...state.userID, user: state.username },
-                });
-                dispatch({ type: "SET_HAS_USERNAME", hasUsername: true });
+                // dispatch({
+                //   type: "SET_USER_ID",
+                //   userID: { ...state.userID, user: state.username },
+                // });
+                // dispatch({ type: "SET_HAS_USERNAME", hasUsername: true });
+                setUserID({ ...userID, user: username });
+                console.log(userID);
+                setHasUsername(true);
                 handleClose();
               },
             },
@@ -217,21 +217,24 @@ export default function ChatUI() {
           <Input
             name="username"
             maxLength={20}
-            value={state.username}
-            onChange={(val) =>
-              dispatch({ type: "SET_USERNAME", username: val })
-            }
+            value={userID.user}
+            onChange={(val) => {
+              // dispatch({ type: "SET_USERNAME", username: val })
+              setUsername(val);
+              setUserID({ ...userID, user: val });
+            }}
             placeholder="Enter username..."
           />
         </Modal>
-        {/* {state.open && (
-        )} */}
       </div>
       <Chat
         locale="en"
-        navbar={{
-          title: `Test chat ${state.isConnected ? "🟢" : "🔴reconnecting"}`,
-        }}
+        // navbar={{
+        //   title: `Test chat ${isConnected ? "🟢" : "🔴reconnecting"}`,
+        // }}
+        renderNavbar={() => (
+          <Nav isConnected={isConnected} handleOpen={handleOpen} />
+        )}
         messages={messages}
         placeholder="Enter message"
         renderMessageContent={renderMessageContent}
@@ -242,5 +245,58 @@ export default function ChatUI() {
         inputOptions={{ value: "Send", "aria-label": "helooooo" }}
       />
     </>
+  );
+}
+
+export function Nav({
+  isConnected,
+  handleOpen,
+}: {
+  isConnected: boolean;
+  handleOpen: any;
+}) {
+  return (
+    <header className="Navbar">
+      <div className="Navbar-left"></div>
+      <div className="Navbar-main">
+        <h2 className="Navbar-title">
+          {`Test chat ${isConnected ? "🟢" : "🔴reconnecting"}`}
+        </h2>
+      </div>
+      <div className="Navbar-right">
+        <button
+          onClick={() => handleOpen()}
+          //  {/* style={{ background: "rgb(75 85 99" }} */}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "black",
+            cursor: "pointer",
+          }}
+          className="rounded bg-gray-100 p-2 text-gray-600 transition hover:text-gray-600/75"
+          aria-expanded="true"
+          aria-label="toggle"
+        >
+          <svg
+            style={{
+              height: "2rem",
+              width: "2rem",
+            }}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25"
+            ></path>
+          </svg>
+        </button>
+      </div>
+    </header>
   );
 }
